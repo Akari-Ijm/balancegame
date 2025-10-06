@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マグネット・スタック・バランス - クリック操作</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #game-container {
+            /* カーソルを乗せたときにゲーム開始を示す */
+            cursor: crosshair; 
+            width: 350px;
+            height: 500px;
+            background-color: #fff;
+            border: 5px solid #4a90e2;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #score {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #d9534f;
+            margin-bottom: 15px;
+        }
+
+        /* マスコット追加ボタンは、クリック操作に変更したため非表示 */
+        #add-mascot {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>マグネット・スタック・バランス</h1>
+    <p>ゲームエリアをクリックした位置から、マスコットが落下します。</p>
+    <div id="game-container">
+        </div>
+    <div id="score">スコア: 0</div>
+
+    <script>
+        // Matter.js のエイリアス設定
+        const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Constraint, Events } = Matter;
+
+        // --- ゲーム設定 ---
+        const CONTAINER_WIDTH = 350;
+        const CONTAINER_HEIGHT = 500;
+        // 変更点: マスコットのサイズを大きく (40 -> 60)
+        const MASCOT_SIZE = 60; 
+        const MAGNETIC_DISTANCE = 70; 
+        // 変更点: クリア条件 (15回)
+        const WIN_COUNT = 15;
+
+        // --- エンジンの作成 ---
+        const engine = Engine.create();
+        const world = engine.world;
+        engine.world.gravity.y = 1; 
+
+        const gameContainer = document.getElementById('game-container');
+
+        // レンダラーの作成
+        const render = Render.create({
+            element: gameContainer,
+            engine: engine,
+            options: {
+                width: CONTAINER_WIDTH,
+                height: CONTAINER_HEIGHT,
+                wireframes: false, 
+                background: '#f8f8f8'
+            }
+        });
+
+        Render.run(render);
+        Engine.run(engine);
+
+        // --- 初期オブジェクトの作成 ---
+        const ground = Bodies.rectangle(
+            CONTAINER_WIDTH / 2, 
+            CONTAINER_HEIGHT - 20, 
+            CONTAINER_WIDTH, 
+            40, 
+            { 
+                isStatic: true, 
+                render: { fillStyle: '#8b4513' } 
+            }
+        );
+
+        const wallOptions = {
+            isStatic: true,
+            render: { fillStyle: '#c0c0c0' }
+        };
+
+        const leftWall = Bodies.rectangle(10, CONTAINER_HEIGHT / 2, 20, CONTAINER_HEIGHT, wallOptions);
+        const rightWall = Bodies.rectangle(CONTAINER_WIDTH - 10, CONTAINER_HEIGHT / 2, 20, CONTAINER_HEIGHT, wallOptions);
+
+        World.add(world, [ground, leftWall, rightWall]);
+
+        // --- マスコットと磁石ロジック用変数 ---
+        let mascotCount = 0;
+        let lastMascot = null;
+        const MASCOTS = [];
+        const CONSTRAINTS = []; 
+        let isGameOver = false;
+
+        /**
+         * 新しいマスコットを指定された位置に作成し、ゲームに追加します。
+         */
+        function addMascot(x, y) {
+            if (isGameOver) return;
+
+            // マスコットの生成位置を範囲内に制限
+            const spawnX = Math.min(Math.max(x, MASCOT_SIZE
