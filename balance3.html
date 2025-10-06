@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マグネット・スタック・バランス - クリック操作</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #game-container {
+            /* 修正点: カーソルを乗せたときにゲーム開始を示す */
+            cursor: crosshair; 
+            width: 350px;
+            height: 500px;
+            background-color: #fff;
+            border: 5px solid #4a90e2;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+            /* 念のため、Matter.jsの描画キャンバスがコンテナを覆うように */
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #score {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #d9534f;
+            margin-bottom: 15px;
+        }
+
+        /* マスコット追加ボタンは、クリック操作に変更したため非表示にします */
+        #add-mascot {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>マグネット・スタック・バランス</h1>
+    <p>ゲームエリアをクリックした位置から、マスコットが落下します。</p>
+    <div id="game-container">
+        </div>
+    <div id="score">スコア: 0</div>
+    <button id="add-mascot" style="display: none;">マスコットを追加</button>
+
+    <script>
+        // Matter.js のエイリアス設定
+        const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Constraint, Events } = Matter;
+
+        // --- ゲーム設定 ---
+        const CONTAINER_WIDTH = 350;
+        const CONTAINER_HEIGHT = 500;
+        const MASCOT_SIZE = 40;
+        // 磁石がくっつく距離を少し長めに設定して、くっつきやすくしました
+        const MAGNETIC_DISTANCE = 70; 
+
+        // --- エンジンの作成 ---
+        const engine = Engine.create();
+        const world = engine.world;
+        engine.world.gravity.y = 1; 
+
+        const gameContainer = document.getElementById('game-container');
+
+        // レンダラーの作成
+        const render = Render.create({
+            element: gameContainer,
+            engine: engine,
+            options: {
+                width: CONTAINER_WIDTH,
+                height: CONTAINER_HEIGHT,
+                wireframes: false, 
+                background: '#f8f8f8'
+            }
+        });
+
+        Render.run(render);
+        Engine.run(engine);
+
+        // --- 初期オブジェクトの作成 ---
+
+        // 地面（台座）の作成
+        const ground = Bodies.rectangle(
+            CONTAINER_WIDTH / 2, 
+            CONTAINER_HEIGHT - 20, 
+            CONTAINER_WIDTH, 
+            40, 
+            { 
+                isStatic: true, 
+                render: { fillStyle: '#8b4513' } 
+            }
+        );
+
+        // 壁の作成
+        const wallOptions = {
+            isStatic: true,
+            render: { fillStyle: '#c0c0c0' }
+        };
+
+        const leftWall = Bodies.rectangle(10, CONTAINER_HEIGHT / 2, 20, CONTAINER_HEIGHT, wallOptions);
+        const rightWall = Bodies.rectangle(CONTAINER_WIDTH - 10, CONTAINER_HEIGHT / 2, 20, CONTAINER_HEIGHT, wallOptions);
+
+        World.add(world, [ground, leftWall, rightWall]);
+
+        // --- マスコットと磁石ロジック用変数 ---
+        let mascotCount = 0;
+        let lastMascot = null;
+        const MASCOTS = [];
+        const CONSTRAINTS = []; 
+        let isGameOver = false;
+
+        /**
+         * 新しいマスコットを指定された位置に作成し、ゲームに追加します。
+         * @param {number} x - マスコットを生成するX座標
+         * @param {number} y - マスコットを生成するY座標
+         */
+        function addMascot(x, y) {
+            if (isGameOver) return;
+
+            // マスコットの生成位置を範囲内に制限
+            const spawnX = Math.min(Math.max(x, MASCOT_SIZE / 2 + 10), CONTAINER_WIDTH - MASCOT_SIZE / 2 - 10);
+            
+            const mascot = Bodies.rectangle(spawnX, y, MASCOT_SIZE, MASCOT_SIZE, {
+                mass: 1,
+                restitution: 0.2, // 反発係数
+                friction: 0.8,    // 摩擦
+                render: {
+                    fillStyle: `hsl(${Math.random() * 360}, 70%, 50%)`, // カラフルな色
+                    strokeStyle: '#333',
+                    lineWidth: 2
+                },
+                label: 'mascot'
+            });
+
+            World.add(world, mascot);
+            MASCOTS.push(mascot);
+            mascotCount++;
+            document.getElementById('score').textContent = `スコア: ${mascotCount - 1}`; 
+            
+            lastMascot = mascot;
+        }
+
+        // --- クリックイベントでマスコットを生成 ---
+        gameContainer.addEventListener('mousedown', function(event) {
+            if (isGameOver) return;
+
+            // コンテナ内の相対座標を取得
+            const rect = gameContainer.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            // クリックした位置からマスコットを生成
+            addMascot(x, y);
+        });
+
+
+        // --- マウス操作（ドラッグ）の有効化 ---
+        // クリックでマスコット生成と、Matter.jsのドラッグ操作を両立させるため、
+        // マウス制約は追加するものの、Matter.jsのデフォルトのドラッグ動作を妨げないようにします。
+        const mouse = Mouse.create(render.canvas);
+        const mouseConstraint = MouseConstraint.create(engine, {
+            mouse: mouse,
+            constraint: {
+                stiffness: 0.2,
+                render: {
+                    visible: false
+                }
+            }
+        });
+        World.add(world, mouseConstraint);
+
+
+        // --- ゲームロジック（磁石の結合とゲームオーバー判定） ---
+
+        /**
+         * 磁石効果をシミュレートする関数
+         */
+        function applyMagnetism() {
+            for (let i = 0; i < MASCOTS.length; i++) {
+                for (let j = i + 1; j < MASCOTS.length; j++) {
+                    const bodyA = MASCOTS[i];
+                    const bodyB = MASCOTS[j];
+
+                    // 既にこのペアが結合されているか確認 
+                    const alreadyConnected = CONSTRAINTS.some(c => 
+                        (c.bodyA === bodyA && c.bodyB === bodyB) || (c.bodyA === bodyB && c.bodyB === bodyA)
+                    );
+                    
+                    if (alreadyConnected) continue;
+
+                    // 距離を計算
+                    const dx = bodyA.position.x - bodyB.position.x;
+                    const dy = bodyA.position.y - bodyB.position.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < MAGNETIC_DISTANCE) {
+                        // 距離が近ければ、固定ジョイントで結合
+                        const constraint = Constraint.create({
+                            bodyA: bodyA,
+                            bodyB: bodyB,
+                            stiffness: 1, // 非常に硬いジョイント
+                            length: distance, 
+                            render: {
+                                visible: false 
+                            }
+                        });
+                        World.add(world, constraint);
+                        CONSTRAINTS.push(constraint); // 結合を記録
+                    }
+                }
+            }
+        }
+
+        /**
+         * ゲームオーバーを判定する関数
+         */
+        function checkGameOver() {
+            if (isGameOver) return;
+
+            // 最後のマスコットが、画面上端(Y=20)を超えてしまったらゲームオーバー
+            // Y座標は上に行くほど小さくなります。
+            if (lastMascot && lastMascot.position.y < 20) { 
+                isGameOver = true;
+                alert(`ゲームオーバー！ ${mascotCount - 1}個積み上げました！`);
+                
+                // ゲーム停止処理
+                Engine.clear(engine);
+                Render.stop(render);
+                gameContainer.style.cursor = 'default';
+            }
+        }
+
+
+        // Matter.js の更新イベントにロジックを追加
+        Events.on(engine, 'afterUpdate', () => {
+            applyMagnetism(); 
+            checkGameOver();
+        });
+    </script>
+</body>
+</html>
