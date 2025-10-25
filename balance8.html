@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>バランス積み上げゲーム</title>
+  <style>
+    body {
+      background: #eef;
+      margin: 0;
+      overflow: hidden;
+      text-align: center;
+      font-family: sans-serif;
+    }
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 20px;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="score">スコア: 0　ミス: 0/3</div>
+  <canvas id="world"></canvas>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    const { Engine, Render, World, Bodies, Runner, Body, Events } = Matter;
+
+    const canvas = document.getElementById("world");
+    const engine = Engine.create();
+    const world = engine.world;
+    const render = Render.create({
+      canvas,
+      engine,
+      options: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        wireframes: false,
+        background: "#eef"
+      }
+    });
+
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    const WIDTH = window.innerWidth;
+    const HEIGHT = window.innerHeight;
+
+    // 地面
+    const ground = Bodies.rectangle(WIDTH / 2, HEIGHT + 50, WIDTH, 100, { isStatic: true });
+    World.add(world, ground);
+
+    // 受け皿（大きく・ゆっくり）
+    const paddleWidth = 300;
+    const paddleHeight = 20;
+    const paddle = Bodies.rectangle(WIDTH / 2, HEIGHT - 100, paddleWidth, paddleHeight, {
+      isStatic: true,
+      render: { fillStyle: "#66c" }
+    });
+    World.add(world, paddle);
+
+    let moveDirection = 1;
+    const moveSpeed = 2; // ゆっくり動く
+
+    // スコアとミス回数
+    let score = 0;
+    let misses = 0;
+    const maxMisses = 3;
+    let gameOver = false;
+
+    // ランダムな形を作る関数
+    function createRandomShape(x, y) {
+      const size = 40 + Math.random() * 20;
+      const type = Math.floor(Math.random() * 3); // 0:四角, 1:丸, 2:三角
+      let body;
+
+      const color = `hsl(${Math.random() * 360}, 70%, 60%)`;
+
+      if (type === 0) {
+        body = Bodies.rectangle(x, y, size, size, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+      } else if (type === 1) {
+        body = Bodies.circle(x, y, size / 2, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+      } else {
+        const half = size / 2;
+        const triangle = Bodies.polygon(x, y, 3, half, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+        body = triangle;
+      }
+
+      World.add(world, body);
+      return body;
+    }
+
+    // クリックで落とす
+    window.addEventListener("click", (e) => {
+      if (gameOver) return;
+      const shape = createRandomShape(e.clientX, 50);
+      shape.isFalling = true;
+    });
+
+    // 落ちたらミスカウント
+    Events.on(engine, "afterUpdate", () => {
+      // 受け皿を左右に動かす
+      if (paddle.position.x > WIDTH - paddleWidth / 2 || paddle.position.x < paddleWidth / 2) {
+        moveDirection *= -1;
+      }
+      Body.setPosition(paddle, { x: paddle.position.x + moveDirection * moveSpeed, y: paddle.position.y });
+
+      // ミス判定
+      world.bodies.forEach(body => {
+        if (body.isFalling && body.position.y > HEIGHT) {
+          World.remove(world, body);
+          body.isFalling = false;
+          misses++;
+          document.getElementById("score").textContent = `スコア: ${score}　ミス: ${misses}/${maxMisses}`;
+          if (misses >= maxMisses) {
+            gameOver = true;
+            alert("ゲームオーバー！😢");
+          }
+        }
+      });
+    });
+
+    // 受け皿に乗ったらスコア加算
+    Events.on(engine, "collisionStart", (event) => {
+      if (gameOver) return;
+      event.pairs.forEach(pair => {
+        if ((pair.bodyA === paddle && pair.bodyB.isFalling) ||
+            (pair.bodyB === paddle && pair.bodyA.isFalling)) {
+          score++;
+          pair.bodyA.isFalling = false;
+          pair.bodyB.isFalling = false;
+          document.getElementById("score").textContent = `スコア: ${score}　ミス: ${misses}/${maxMisses}`;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
