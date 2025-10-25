@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>マグネット・スタック・バランス</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background-color: #eef2f3;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    /* ★ ゲームエリア全体を明確に囲む */
+    #game-container {
+      position: relative;
+      width: 350px;
+      height: 500px;
+      background-color: #ffffff;
+      border: 6px solid #4a90e2;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+      overflow: hidden;
+      margin-bottom: 15px;
+    }
+
+    #score {
+      font-size: 1.4em;
+      font-weight: bold;
+      color: #d9534f;
+    }
+
+    #message {
+      font-size: 1.2em;
+      color: #333;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>マグネット・スタック・バランス</h1>
+  <p>クリックで図形を落とし、動く受け皿に3回までミスOK！</p>
+  <div id="game-container"></div>
+  <div id="score">スコア: 0</div>
+  <div id="message"></div>
+
+  <script>
+    const { Engine, Render, World, Bodies, Body, Events, Composite } = Matter;
+
+    const WIDTH = 350;
+    const HEIGHT = 500;
+    const SHAPE_SIZE = 60;
+    const WIN_COUNT = 20;
+    const MAX_FALLS = 3; // ★ 3回までミスOK
+
+    const engine = Engine.create();
+    const world = engine.world;
+    engine.world.gravity.y = 1;
+
+    const container = document.getElementById("game-container");
+
+    const render = Render.create({
+      element: container,
+      engine: engine,
+      options: {
+        width: WIDTH,
+        height: HEIGHT,
+        wireframes: false,
+        background: "#fafafa"
+      }
+    });
+
+    Render.run(render);
+    Engine.run(engine);
+
+    // ★ 壁と天井・床をゲームエリア内に配置
+    const walls = [
+      Bodies.rectangle(WIDTH / 2, HEIGHT + 10, WIDTH, 20, { isStatic: true, render: { fillStyle: "#bbb" } }), // 床
+      Bodies.rectangle(WIDTH / 2, -10, WIDTH, 20, { isStatic: true, render: { fillStyle: "#bbb" } }), // 天井
+      Bodies.rectangle(-10, HEIGHT / 2, 20, HEIGHT, { isStatic: true, render: { fillStyle: "#bbb" } }), // 左
+      Bodies.rectangle(WIDTH + 10, HEIGHT / 2, 20, HEIGHT, { isStatic: true, render: { fillStyle: "#bbb" } }) // 右
+    ];
+
+    // ★ 受け皿（大きめ・ゆっくり移動）
+    const trayWidth = 220;
+    const trayHeight = 25;
+    const trayY = HEIGHT - 40;
+    const tray = Bodies.rectangle(WIDTH / 2, trayY, trayWidth, trayHeight, {
+      isStatic: true,
+      render: { fillStyle: "#8b4513" }
+    });
+
+    World.add(world, [...walls, tray]);
+
+    let trayDirection = 1;
+    const traySpeed = 0.8;
+
+    // ★ 落下回数とスコア
+    let shapeCount = 0;
+    let fallCount = 0;
+    let isGameOver = false;
+
+    const scoreEl = document.getElementById("score");
+    const msgEl = document.getElementById("message");
+
+    // ★ トレイの動き
+    Events.on(engine, "beforeUpdate", () => {
+      if (isGameOver) return;
+
+      Body.setPosition(tray, {
+        x: tray.position.x + traySpeed * trayDirection,
+        y: tray.position.y
+      });
+
+      if (tray.position.x > WIDTH - trayWidth / 2 - 5) trayDirection = -1;
+      else if (tray.position.x < trayWidth / 2 + 5) trayDirection = 1;
+    });
+
+    // ★ クリックで図形を落とす
+    container.addEventListener("click", (e) => {
+      if (isGameOver) return;
+
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      addShape(x, y);
+    });
+
+    // ★ ランダム図形生成
+    function addShape(x, y) {
+      const type = Math.floor(Math.random() * 3);
+      const color = `hsl(${Math.random() * 360}, 70%, 60%)`;
+      let shape;
+
+      switch (type) {
+        case 0:
+          shape = Bodies.circle(x, y, SHAPE_SIZE / 2, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+          break;
+        case 1:
+          shape = Bodies.rectangle(x, y, SHAPE_SIZE, SHAPE_SIZE, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+          break;
+        case 2:
+          shape = Bodies.polygon(x, y, 3, SHAPE_SIZE / 1.2, { restitution: 0.2, friction: 0.8, render: { fillStyle: color } });
+          break;
+      }
+
+      World.add(world, shape);
+      shapeCount++;
+      scoreEl.textContent = `スコア: ${shapeCount}`;
+    }
+
+    // ★ 図形とトレイの動き同期（接触中は一緒に動く）
+    Events.on(engine, "afterUpdate", () => {
+      if (isGameOver) return;
+
+      const movingBodies = Composite.allBodies(world).filter(b => !b.isStatic);
+
+      movingBodies.forEach(body => {
+        // 受け皿の上にある場合
+        if (
+          body.position.y > tray.position.y - 40 &&
+          Math.abs(body.position.x - tray.position.x) < trayWidth / 2
+        ) {
+          // 皿の動きに合わせて少し移動
+          Body.translate(body, { x: traySpeed * trayDirection * 0.9, y: 0 });
+        }
+
+        // ★ 皿から落下した場合の処理
+        if (body.position.y > HEIGHT + 20) {
+          World.remove(world, body);
+          fallCount++;
+
+          if (fallCount >= MAX_FALLS) {
+            endGame("3回落ちた！ゲームオーバー💥");
+          } else {
+            msgEl.textContent = `⚠️ 落下ミス！あと${MAX_FALLS - fallCount}回OK`;
+            msgEl.style.color = "#d9534f";
+          }
+        }
+      });
+
+      // ★ スコアによるクリア判定
+      if (shapeCount >= WIN_COUNT) {
+        endGame("クリア！おめでとう🎉");
+      }
+    });
+
+    // ★ 終了処理
+    function endGame(message) {
+      isGameOver = true;
+      msgEl.textContent = message;
+      msgEl.style.color = message.includes("クリア") ? "#28a745" : "#d9534f";
+
+      setTimeout(() => {
+        if (confirm("もう一度遊びますか？")) location.reload();
+      }, 800);
+    }
+  </script>
+</body>
+</html>
