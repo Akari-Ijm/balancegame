@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>バランス積み上げゲーム</title>
+  <style>
+    body {
+      background: #eef;
+      margin: 0;
+      overflow: hidden;
+      text-align: center;
+      font-family: sans-serif;
+    }
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 20px;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="score">スコア: 0　ミス: 0/3</div>
+  <canvas id="world"></canvas>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    const { Engine, Render, World, Bodies, Runner, Body, Events, Constraint } = Matter;
+
+    const canvas = document.getElementById("world");
+    const engine = Engine.create();
+    const world = engine.world;
+    const render = Render.create({
+      canvas,
+      engine,
+      options: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        wireframes: false,
+        background: "#eef"
+      }
+    });
+
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    const WIDTH = window.innerWidth;
+    const HEIGHT = window.innerHeight;
+
+    // 地面（見えない）
+    const ground = Bodies.rectangle(WIDTH / 2, HEIGHT + 50, WIDTH, 100, { isStatic: true });
+    World.add(world, ground);
+
+    // 受け皿（大きくてゆっくり動く）
+    const paddleWidth = 300;
+    const paddleHeight = 20;
+    const paddle = Bodies.rectangle(WIDTH / 2, HEIGHT - 100, paddleWidth, paddleHeight, {
+      isStatic: true,
+      render: { fillStyle: "#66c" }
+    });
+    World.add(world, paddle);
+
+    let moveDirection = 1;
+    const moveSpeed = 2; // ゆっくり動く
+
+    // スコアとミス回数
+    let score = 0;
+    let misses = 0;
+    const maxMisses = 3;
+    let gameOver = false;
+
+    // ランダムな形を生成
+    function createRandomShape(x, y) {
+      const size = 40 + Math.random() * 20;
+      const type = Math.floor(Math.random() * 3); // 0:四角, 1:丸, 2:三角
+      let body;
+      const color = `hsl(${Math.random() * 360}, 70%, 60%)`;
+
+      if (type === 0) {
+        body = Bodies.rectangle(x, y, size, size, { restitution: 0.2, friction: 0.9, render: { fillStyle: color } });
+      } else if (type === 1) {
+        body = Bodies.circle(x, y, size / 2, { restitution: 0.2, friction: 0.9, render: { fillStyle: color } });
+      } else {
+        body = Bodies.polygon(x, y, 3, size / 2, { restitution: 0.2, friction: 0.9, render: { fillStyle: color } });
+      }
+
+      body.isFalling = true;
+      World.add(world, body);
+      return body;
+    }
+
+    // クリックで落下
+    window.addEventListener("click", (e) => {
+      if (gameOver) return;
+      createRandomShape(e.clientX, 50);
+    });
+
+    // 受け皿の左右移動
+    Events.on(engine, "afterUpdate", () => {
+      if (paddle.position.x > WIDTH - paddleWidth / 2 || paddle.position.x < paddleWidth / 2) {
+        moveDirection *= -1;
+      }
+      Body.setPosition(paddle, { x: paddle.position.x + moveDirection * moveSpeed, y: paddle.position.y });
+
+      // 落下ミス判定
+      world.bodies.forEach(body => {
+        if (body.isFalling && body.position.y > HEIGHT) {
+          World.remove(world, body);
+          body.isFalling = false;
+          misses++;
+          document.getElementById("score").textContent = `スコア: ${score}　ミス: ${misses}/${maxMisses}`;
+          if (misses >= maxMisses) {
+            gameOver = true;
+            alert("ゲームオーバー！😢");
+          }
+        }
+      });
+    });
+
+    // 衝突処理（受け皿または他の図形に乗ったら一緒に動くようにする）
+    Events.on(engine, "collisionStart", (event) => {
+      if (gameOver) return;
+
+      event.pairs.forEach(pair => {
+        const { bodyA, bodyB } = pair;
+
+        const isPaddleCollision =
+          (bodyA.isFalling && bodyB === paddle) || (bodyB.isFalling && bodyA === paddle);
+
+        if (isPaddleCollision) {
+          const fallingBody = bodyA.isFalling ? bodyA : bodyB;
+          fallingBody.isFalling = false;
+
+          // 皿とつなぐConstraint（弾性あり）
+          const joint = Constraint.create({
+            bodyA: paddle,
+            bodyB: fallingBody,
+            pointA: { x: 0, y: -10 },
+            pointB: { x: 0, y: 10 },
+            stiffness: 0.002, // 柔らかくつなぐ
+            damping: 0.1
+          });
+          World.add(world, joint);
+
+          score++;
+          document.getElementById("score").textContent = `スコア: ${score}　ミス: ${misses}/${maxMisses}`;
+        }
+
+        // 他の静止ブロックの上に乗った場合
+        const isBlockCollision =
+          (bodyA.isFalling && bodyB.isStatic && bodyB !== ground) ||
+          (bodyB.isFalling && bodyA.isStatic && bodyA !== ground);
+
+        if (isBlockCollision) {
+          const fallingBody = bodyA.isFalling ? bodyA : bodyB;
+          fallingBody.isFalling = false;
+          fallingBody.isStatic = true; // 固定化
+          score++;
+          document.getElementById("score").textContent = `スコア: ${score}　ミス: ${misses}/${maxMisses}`;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
